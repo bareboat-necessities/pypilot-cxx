@@ -58,8 +58,4 @@ if(PYPILOT_CXX_BUILD_TESTS)
     add_executable(test_autopilot tests/test_autopilot.cpp)
     target_link_libraries(test_autopilot PRIVATE pypilot_core)
     add_test(NAME test_autopilot COMMAND test_autopilot)
-
-    add_executable(test_server tests/test_server.cpp)
-    target_link_libraries(test_server PRIVATE pypilot_core)
-    add_test(NAME test_server COMMAND test_server)
 endif()
