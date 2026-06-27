@@ -5,16 +5,9 @@
 
 namespace pypilot::syslib::data_model {
 
-enum class SensorSource {
-    none,
-    gpsd,
-    servo,
-    serial,
-    tcp,
-    signalk,
-    water_wind,
-    gps_wind,
-};
+using Real = float;
+
+enum class SensorSource { none, gpsd, servo, serial, tcp, signalk, water_wind, gps_wind };
 
 inline int source_priority(SensorSource source)
 {
@@ -54,20 +47,10 @@ struct SourceStamped {
     bool valid = false;
 };
 
-template <typename RealT = float>
+template <typename RealT = Real>
 struct DataModel {
-    struct Server {
-        bool running = false;
-        uint16_t port = 23322;
-    } server;
-
-    struct Status {
-        bool enabled = false;
-        bool imu_ready = false;
-        std::string mode = "compass";
-        std::string pilot = "basic";
-    } status;
-
+    struct Server { bool running = false; uint16_t port = 23322; } server;
+    struct Status { bool enabled = false; bool imu_ready = false; std::string mode = "compass"; std::string pilot = "basic"; } status;
     struct Ap {
         bool enabled = false;
         RealT heading = 0;
@@ -76,41 +59,12 @@ struct DataModel {
         RealT command = 0;
         std::string mode = "compass";
         std::string pilot = "basic";
-        struct Tack {
-            bool state = false;
-            int direction = 0;
-            RealT timeout = 0;
-        } tack;
+        struct Tack { bool state = false; int direction = 0; RealT timeout = 0; } tack;
     } ap;
-
-    struct Imu {
-        RealT heading = 0;
-        RealT pitch = 0;
-        RealT roll = 0;
-        RealT heading_rate = 0;
-        bool valid = false;
-        uint64_t timestamp_us = 0;
-    } imu;
-
-    struct Gps {
-        SourceStamped<RealT> speed;
-        SourceStamped<RealT> track;
-        SourceStamped<RealT> latitude;
-        SourceStamped<RealT> longitude;
-    } gps;
-
-    struct Wind {
-        SourceStamped<RealT> apparent_direction;
-        SourceStamped<RealT> apparent_speed;
-        SourceStamped<RealT> true_direction;
-        SourceStamped<RealT> true_speed;
-    } wind;
-
-    struct Water {
-        SourceStamped<RealT> speed;
-        SourceStamped<RealT> leeway;
-    } water;
-
+    struct Imu { RealT heading = 0; RealT pitch = 0; RealT roll = 0; RealT heading_rate = 0; bool valid = false; uint64_t timestamp_us = 0; } imu;
+    struct Gps { SourceStamped<RealT> speed; SourceStamped<RealT> track; SourceStamped<RealT> latitude; SourceStamped<RealT> longitude; } gps;
+    struct Wind { SourceStamped<RealT> apparent_direction; SourceStamped<RealT> apparent_speed; SourceStamped<RealT> true_direction; SourceStamped<RealT> true_speed; } wind;
+    struct Water { SourceStamped<RealT> speed; SourceStamped<RealT> leeway; } water;
     struct Rudder {
         SourceStamped<RealT> angle;
         SourceStamped<RealT> speed;
@@ -128,16 +82,7 @@ struct DataModel {
         std::string calibration_state = "idle";
         std::string last_device;
     } rudder;
-
-    struct Navigation {
-        struct Apb {
-            SourceStamped<RealT> xte_nmi;
-            SourceStamped<RealT> track_deg;
-            std::string sender_id;
-            bool mode_hint = false;
-        } apb;
-    } navigation;
-
+    struct Navigation { struct Apb { SourceStamped<RealT> xte_nmi; SourceStamped<RealT> track_deg; std::string sender_id; bool mode_hint = false; } apb; } navigation;
     struct Servo {
         RealT position_command = 0;
         RealT command = 0;
