@@ -37,13 +37,15 @@ Status: scaffolded.
 
 ## Phase 1 — values/server/client
 
-Status: scaffolded.
+Status: in progress.
 
-- [x] `values.cpp` initial registry and typed value shell.
-- [x] `server.cpp` PyPilot server shell.
-- [x] `client.cpp` PyPilot client shell.
-- [ ] Translate full `values.py` property classes and persistence.
-- [ ] Translate PyPilot JSON/watch protocol.
+- [x] `values.cpp` typed descriptor registry over `PypilotState` instead of string-value storage.
+- [x] External string names are now protocol metadata only; storage lives in typed structures.
+- [x] `server.cpp` direct line-protocol parser for list/get/set/watch.
+- [x] Immediate and periodic watch queues over typed fields.
+- [x] `client.cpp` outbound watch/set shell and inbound typed-field apply.
+- [ ] Translate full `values.py` property metadata and exact JSON output compatibility.
+- [ ] Add persistence/profile behavior from `server.py`.
 - [ ] Translate TCP server behavior from `server.py`.
 - [ ] Translate reconnect/watch behavior from `client.py`.
 
