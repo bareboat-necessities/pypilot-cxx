@@ -22,29 +22,53 @@ using Real = syslib::data_model::Real;
 using PypilotState = syslib::data_model::DataModel<Real>;
 using SensorSource = syslib::data_model::SensorSource;
 
+class ValueWriter {
+public:
+    virtual ~ValueWriter() = default;
+    virtual bool write(std::string_view text) = 0;
+
+    bool write_char(char c) { return write(std::string_view(&c, 1)); }
+    bool write_bool(bool value) { return write(value ? "true" : "false"); }
+    bool write_real(Real value);
+    bool write_u32(uint32_t value);
+    bool write_json_string(std::string_view text);
+};
+
+class StringValueWriter final : public ValueWriter {
+public:
+    explicit StringValueWriter(std::string& out) : out_(out) {}
+    bool write(std::string_view text) override { out_.append(text.data(), text.size()); return true; }
+private:
+    std::string& out_;
+};
+
 class ValueRegistry {
 public:
-    enum class Kind { number, boolean, string, json };
-    enum class FieldId {
-        server_running, server_port, ap_enabled, ap_mode, ap_pilot, ap_heading,
-        ap_heading_command, ap_heading_error, ap_command, ap_tack_state,
-        ap_tack_direction, imu_heading, imu_pitch, imu_roll, imu_heading_rate,
-        gps_speed, gps_track, gps_latitude, gps_longitude, wind_direction,
-        wind_speed, truewind_direction, truewind_speed, water_speed,
-        water_leeway, rudder_angle, rudder_speed, rudder_offset, rudder_scale,
-        rudder_nonlinearity, rudder_range, rudder_calibration_state,
-        servo_position_command, servo_command, servo_current, servo_current_noise,
-        servo_voltage, servo_controller_temp, servo_motor_temp, servo_max_current,
-        servo_current_factor, servo_current_offset, servo_voltage_factor,
-        servo_voltage_offset, servo_max_controller_temp, servo_max_motor_temp,
-        servo_max_slew_speed, servo_max_slew_slow, servo_speed_gain, servo_gain,
-        servo_clutch_pwm, servo_use_brake, servo_period, servo_compensate_current,
-        servo_compensate_voltage, servo_amp_hours, servo_watts, servo_speed,
-        servo_speed_min, servo_speed_max, servo_position, servo_position_p,
-        servo_position_i, servo_position_d, servo_raw_command, servo_use_eeprom,
-        servo_state, servo_controller, servo_flags, servo_engaged, servo_fault,
-        apb_xte, apb_track, apb_sender, apb_mode,
+    static constexpr size_t MaxWatches = 64;
+
+    enum class Kind : uint8_t { real, boolean, string };
+
+    enum class FieldId : uint16_t {
+        server_running,
+        server_port,
+        ap_enabled,
+        ap_mode,
+        ap_pilot,
+        ap_heading,
+        ap_heading_command,
+        ap_heading_error,
+        ap_command,
+        rudder_angle,
+        rudder_offset,
+        rudder_range,
+        servo_command,
+        servo_current,
+        servo_voltage,
+        servo_engaged,
+        servo_fault,
+        count,
     };
+
     struct Info {
         const char* type = "Value";
         bool writable = false;
@@ -58,70 +82,104 @@ public:
         const char* units = "";
         const char* choices_csv = "";
     };
-    struct Descriptor { const char* name; FieldId id; Kind kind; Info info; };
 
-    void attach(PypilotState& state);
+    struct Descriptor {
+        const char* name;
+        FieldId id;
+        Kind kind;
+        Info info;
+    };
+
+    void attach(PypilotState& state) { state_ = &state; }
     bool attached() const { return state_ != nullptr; }
-    bool set_number(std::string_view name, Real value);
-    bool set_bool(std::string_view name, bool value);
-    bool set_string(std::string_view name, std::string_view value);
-    bool set_json(std::string_view name, std::string_view json);
-    bool set_from_wire(std::string_view name, std::string_view wire_value, bool external_write = true);
-    std::optional<Real> get_number(std::string_view name) const;
-    std::optional<bool> get_bool(std::string_view name) const;
-    std::optional<std::string> get_string(std::string_view name) const;
-    std::optional<std::string> get_wire(std::string_view name) const;
+
     const Descriptor* find(std::string_view name) const;
-    std::vector<std::string> names() const;
-    std::string values_json() const;
-    std::string info_json(std::string_view name) const;
-    bool watch(std::string_view name, Real period_seconds, uint64_t now_us, std::string* initial_line = nullptr);
+    const Descriptor* descriptor(FieldId id) const;
+    static constexpr size_t FieldCount = static_cast<size_t>(FieldId::count);
+    static constexpr size_t field_count() { return FieldCount; }
+
+    bool set_from_wire(std::string_view name, std::string_view wire_value, bool external_write = true);
+    bool set_real(std::string_view name, Real value, bool external_write = false);
+    bool set_number(std::string_view name, Real value) { return set_real(name, value); }
+    bool set_bool(std::string_view name, bool value, bool external_write = false);
+    bool set_string(std::string_view name, std::string_view value, bool external_write = false);
+
+    bool read_real(std::string_view name, Real& out) const;
+    bool read_bool(std::string_view name, bool& out) const;
+    bool read_string(std::string_view name, std::string_view& out) const;
+
+    bool write_value(std::string_view name, ValueWriter& out) const;
+    bool write_value_line(std::string_view name, ValueWriter& out) const;
+    bool write_value_line(FieldId id, ValueWriter& out) const;
+    bool write_values_json(ValueWriter& out) const;
+    bool write_info_json(FieldId id, ValueWriter& out) const;
+
+    bool watch(std::string_view name, Real period_seconds, uint64_t now_us, ValueWriter* initial_line = nullptr);
     bool unwatch(std::string_view name);
-    std::vector<std::string> take_due_watches(uint64_t now_us);
-    std::vector<std::string> take_changed_watches();
+    void mark_dirty(FieldId id);
+    void emit_changed_watches(ValueWriter& out);
+    void emit_due_watches(uint64_t now_us, ValueWriter& out);
 
 private:
-    struct Watch { FieldId id; Real period_seconds = 0; uint64_t next_due_us = 0; };
-    bool set_number(FieldId id, Real value, bool external_write);
+    struct Watch {
+        bool active = false;
+        FieldId id = FieldId::server_running;
+        Real period_seconds = 0;
+        uint64_t next_due_us = 0;
+    };
+
+    bool set_real(FieldId id, Real value, bool external_write);
     bool set_bool(FieldId id, bool value, bool external_write);
     bool set_string(FieldId id, std::string_view value, bool external_write);
-    std::optional<Real> get_number(FieldId id) const;
-    std::optional<bool> get_bool(FieldId id) const;
-    std::optional<std::string> get_string(FieldId id) const;
-    std::optional<std::string> get_wire(FieldId id) const;
-    void mark_changed(FieldId id);
-    const Descriptor* descriptor(FieldId id) const;
-    static std::string quote_json(std::string_view text);
+    bool read_real(FieldId id, Real& out) const;
+    bool read_bool(FieldId id, bool& out) const;
+    bool read_string(FieldId id, std::string_view& out) const;
+
     PypilotState* state_ = nullptr;
-    std::vector<Watch> watches_;
-    std::vector<FieldId> changed_;
+    std::array<Watch, MaxWatches> watches_{};
+    std::array<bool, FieldCount> dirty_{};
 };
 
 class PypilotServer {
 public:
     PypilotServer(EventLoop& loop, PypilotState& state, ValueRegistry& values);
+
     void poll();
+    void poll(ValueWriter& out);
     bool running() const { return running_; }
-    std::vector<std::string> handle_line(std::string_view line);
-    std::vector<std::string> collect_output();
+
+    bool handle_line(std::string_view line, ValueWriter& out);
+    std::string handle_line(std::string_view line);
+    std::string collect_output();
+
 private:
-    std::vector<std::string> handle_assignment(std::string_view name, std::string_view value);
-    std::vector<std::string> handle_watch(std::string_view expression);
-    std::vector<std::string> error(std::string message) const;
-    EventLoop& loop_; PypilotState& state_; ValueRegistry& values_; bool running_ = false; std::deque<std::string> output_;
+    bool handle_assignment(std::string_view name, std::string_view value, ValueWriter& out);
+    bool handle_watch(std::string_view expression, ValueWriter& out);
+    bool error(ValueWriter& out, std::string_view message) const;
+
+    EventLoop& loop_;
+    PypilotState& state_;
+    ValueRegistry& values_;
+    bool running_ = false;
 };
 
 class PypilotClient {
 public:
     PypilotClient(EventLoop& loop, PypilotState& state, ValueRegistry& values);
+
     void poll();
     void receive(Real timeout_seconds);
     void watch(std::string name, Real period_seconds = 0);
     void set(std::string name, std::string wire_value);
     std::optional<std::string> pop_outgoing();
     void handle_line(std::string_view line);
+
 private:
-    EventLoop& loop_; PypilotState& state_; ValueRegistry& values_; std::deque<std::string> outgoing_; std::deque<std::string> incoming_;
+    EventLoop& loop_;
+    PypilotState& state_;
+    ValueRegistry& values_;
+    std::deque<std::string> outgoing_;
+    std::deque<std::string> incoming_;
 };
 
 class Sensors { public: explicit Sensors(PypilotState& state); void poll(uint64_t now_us); bool accept_source(SensorSource current, SensorSource incoming) const; void update_apb_command(); private: PypilotState& state_; uint64_t last_apb_update_us_ = 0; };

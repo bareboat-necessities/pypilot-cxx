@@ -1,11 +1,315 @@
 #include "pypilot/pypilot.hpp"
-#include <algorithm>
+
+#include <cstdio>
 #include <cstdlib>
-#include <sstream>
-namespace pypilot { namespace { using FieldId=ValueRegistry::FieldId; using Kind=ValueRegistry::Kind; using Descriptor=ValueRegistry::Descriptor; constexpr Descriptor fields[]={{"ap.enabled",FieldId::ap_enabled,Kind::boolean,{"BooleanProperty",true}},{"ap.heading",FieldId::ap_heading,Kind::number,{"SensorValue"}},{"ap.heading_command",FieldId::ap_heading_command,Kind::number,{"RangeProperty",true}},{"ap.heading_error",FieldId::ap_heading_error,Kind::number,{"SensorValue"}},{"ap.mode",FieldId::ap_mode,Kind::string,{"EnumProperty",true}},{"ap.pilot",FieldId::ap_pilot,Kind::string,{"EnumProperty",true}},{"servo.command",FieldId::servo_command,Kind::number,{"RangeProperty",true}},{"servo.engaged",FieldId::servo_engaged,Kind::boolean,{"BooleanValue"}},{"servo.fault",FieldId::servo_fault,Kind::boolean,{"BooleanValue"}},{"server.running",FieldId::server_running,Kind::boolean,{"BooleanValue"}},{"server.port",FieldId::server_port,Kind::number,{"Value"}}}; Real parse_real(std::string_view s){return std::strtof(std::string(s).c_str(),nullptr);} }
-void ValueRegistry::attach(PypilotState& s){state_=&s;} const ValueRegistry::Descriptor* ValueRegistry::descriptor(FieldId id) const{for(auto& d:fields)if(d.id==id)return &d;return nullptr;} const ValueRegistry::Descriptor* ValueRegistry::find(std::string_view n) const{for(auto& d:fields)if(n==d.name)return &d;return nullptr;} std::vector<std::string> ValueRegistry::names() const{std::vector<std::string> v;for(auto& d:fields)v.emplace_back(d.name);return v;}
-bool ValueRegistry::set_number(std::string_view n,Real v){auto*d=find(n);return d&&set_number(d->id,v,false);} bool ValueRegistry::set_bool(std::string_view n,bool v){auto*d=find(n);return d&&set_bool(d->id,v,false);} bool ValueRegistry::set_string(std::string_view n,std::string_view v){auto*d=find(n);return d&&set_string(d->id,v,false);} bool ValueRegistry::set_json(std::string_view n,std::string_view v){return set_string(n,v);} bool ValueRegistry::set_from_wire(std::string_view n,std::string_view v,bool){if(auto*d=find(n)){if(d->kind==Kind::number)return set_number(d->id,parse_real(v),false);if(d->kind==Kind::boolean)return set_bool(d->id,v=="true"||v=="1",false);return set_string(d->id,v,false);}return false;}
-bool ValueRegistry::set_number(FieldId id,Real v,bool){if(!state_)return false;switch(id){case FieldId::ap_heading:state_->ap.heading=v;break;case FieldId::ap_heading_command:state_->ap.heading_command=v;break;case FieldId::ap_heading_error:state_->ap.heading_error=v;break;case FieldId::servo_command:state_->servo.command=v;break;case FieldId::server_port:state_->server.port=static_cast<uint16_t>(v);break;default:return false;}mark_changed(id);return true;} bool ValueRegistry::set_bool(FieldId id,bool v,bool){if(!state_)return false;switch(id){case FieldId::ap_enabled:state_->ap.enabled=v;break;case FieldId::servo_engaged:state_->servo.engaged=v;break;case FieldId::servo_fault:state_->servo.fault=v;break;case FieldId::server_running:state_->server.running=v;break;default:return false;}mark_changed(id);return true;} bool ValueRegistry::set_string(FieldId id,std::string_view v,bool){if(!state_)return false;if(id==FieldId::ap_mode)state_->ap.mode=std::string(v);else if(id==FieldId::ap_pilot)state_->ap.pilot=std::string(v);else return false;mark_changed(id);return true;}
-std::optional<Real> ValueRegistry::get_number(std::string_view n) const{auto*d=find(n);return d?get_number(d->id):std::nullopt;} std::optional<bool> ValueRegistry::get_bool(std::string_view n) const{auto*d=find(n);return d?get_bool(d->id):std::nullopt;} std::optional<std::string> ValueRegistry::get_string(std::string_view n) const{auto*d=find(n);return d?get_string(d->id):std::nullopt;}
-std::optional<Real> ValueRegistry::get_number(FieldId id) const{if(!state_)return std::nullopt;switch(id){case FieldId::ap_heading:return state_->ap.heading;case FieldId::ap_heading_command:return state_->ap.heading_command;case FieldId::ap_heading_error:return state_->ap.heading_error;case FieldId::servo_command:return state_->servo.command;case FieldId::server_port:return static_cast<Real>(state_->server.port);default:return std::nullopt;}} std::optional<bool> ValueRegistry::get_bool(FieldId id) const{if(!state_)return std::nullopt;switch(id){case FieldId::ap_enabled:return state_->ap.enabled;case FieldId::servo_engaged:return state_->servo.engaged;case FieldId::servo_fault:return state_->servo.fault;case FieldId::server_running:return state_->server.running;default:return std::nullopt;}} std::optional<std::string> ValueRegistry::get_string(FieldId id) const{if(!state_)return std::nullopt;if(id==FieldId::ap_mode)return state_->ap.mode;if(id==FieldId::ap_pilot)return state_->ap.pilot;return std::nullopt;} std::optional<std::string> ValueRegistry::get_wire(std::string_view n) const{auto*d=find(n);return d?get_wire(d->id):std::nullopt;} std::optional<std::string> ValueRegistry::get_wire(FieldId id) const{if(auto n=get_number(id))return std::to_string(*n);if(auto b=get_bool(id))return *b?"true":"false";if(auto s=get_string(id))return quote_json(*s);return std::nullopt;} std::string ValueRegistry::quote_json(std::string_view t){return std::string("\"")+std::string(t)+"\"";} std::string ValueRegistry::info_json(std::string_view n) const{return find(n)?"{}":"{}";} std::string ValueRegistry::values_json() const{std::ostringstream o;o<<'{';bool f=true;for(auto&d:fields){if(!f)o<<',';f=false;o<<quote_json(d.name)<<":"<<info_json(d.name);}o<<'}';return o.str();} void ValueRegistry::mark_changed(FieldId id){if(std::find(changed_.begin(),changed_.end(),id)==changed_.end())changed_.push_back(id);} bool ValueRegistry::watch(std::string_view n,Real p,uint64_t now,std::string* initial){auto*d=find(n);if(!d)return false;watches_.push_back({d->id,p,now});if(initial){auto w=get_wire(d->id);if(w)*initial=std::string(d->name)+'='+*w+'\n';}return true;} bool ValueRegistry::unwatch(std::string_view n){auto*d=find(n);if(!d)return false;watches_.erase(std::remove_if(watches_.begin(),watches_.end(),[&](auto&w){return w.id==d->id;}),watches_.end());return true;} std::vector<std::string> ValueRegistry::take_due_watches(uint64_t){return {};} std::vector<std::string> ValueRegistry::take_changed_watches(){std::vector<std::string> out;for(auto id:changed_){auto*d=descriptor(id);auto w=get_wire(id);if(d&&w)out.push_back(std::string(d->name)+'='+*w+'\n');}changed_.clear();return out;}
+
+namespace pypilot {
+namespace {
+using FieldId = ValueRegistry::FieldId;
+using Kind = ValueRegistry::Kind;
+using Descriptor = ValueRegistry::Descriptor;
+
+constexpr Descriptor fields[] = {
+    {"server.running", FieldId::server_running, Kind::boolean, {"BooleanValue", false}},
+    {"server.port", FieldId::server_port, Kind::real, {"Value", false}},
+    {"ap.enabled", FieldId::ap_enabled, Kind::boolean, {"BooleanProperty", true, true}},
+    {"ap.mode", FieldId::ap_mode, Kind::string, {"EnumProperty", true, true}},
+    {"ap.pilot", FieldId::ap_pilot, Kind::string, {"EnumProperty", true, true}},
+    {"ap.heading", FieldId::ap_heading, Kind::real, {"SensorValue", false, false, false, true}},
+    {"ap.heading_command", FieldId::ap_heading_command, Kind::real, {"RangeProperty", true, false, false, true, true, true, 0, 360, "degrees"}},
+    {"ap.heading_error", FieldId::ap_heading_error, Kind::real, {"SensorValue", false, false, false, true}},
+    {"ap.command", FieldId::ap_command, Kind::real, {"SensorValue", false}},
+    {"rudder.angle", FieldId::rudder_angle, Kind::real, {"SensorValue", false, false, false, true}},
+    {"rudder.offset", FieldId::rudder_offset, Kind::real, {"RangeProperty", true, true}},
+    {"rudder.range", FieldId::rudder_range, Kind::real, {"RangeProperty", true, true}},
+    {"servo.command", FieldId::servo_command, Kind::real, {"RangeProperty", true, false, false, false, true, true, -1, 1}},
+    {"servo.current", FieldId::servo_current, Kind::real, {"SensorValue", false}},
+    {"servo.voltage", FieldId::servo_voltage, Kind::real, {"SensorValue", false}},
+    {"servo.engaged", FieldId::servo_engaged, Kind::boolean, {"BooleanValue", false}},
+    {"servo.fault", FieldId::servo_fault, Kind::boolean, {"BooleanValue", false}},
+};
+
+bool parse_real(std::string_view s, Real& out)
+{
+    char buf[32]{};
+    const size_t n = s.size() < sizeof(buf) - 1 ? s.size() : sizeof(buf) - 1;
+    for (size_t i = 0; i < n; ++i) buf[i] = s[i];
+    char* end = nullptr;
+    out = std::strtof(buf, &end);
+    return end != buf;
 }
+
+bool parse_bool(std::string_view s, bool& out)
+{
+    if (s == "true" || s == "True" || s == "1") { out = true; return true; }
+    if (s == "false" || s == "False" || s == "0") { out = false; return true; }
+    return false;
+}
+
+std::string_view strip_quotes(std::string_view s)
+{
+    if (s.size() >= 2 && s.front() == '"' && s.back() == '"') return s.substr(1, s.size() - 2);
+    return s;
+}
+
+uint64_t period_us(Real seconds)
+{
+    return seconds <= Real{0} ? 0 : static_cast<uint64_t>(seconds * Real{1000000});
+}
+} // namespace
+
+bool ValueWriter::write_real(Real value)
+{
+    char buf[32];
+    const int n = std::snprintf(buf, sizeof(buf), "%.4f", static_cast<double>(value));
+    return n > 0 && write(std::string_view(buf, static_cast<size_t>(n)));
+}
+
+bool ValueWriter::write_u32(uint32_t value)
+{
+    char buf[16];
+    const int n = std::snprintf(buf, sizeof(buf), "%lu", static_cast<unsigned long>(value));
+    return n > 0 && write(std::string_view(buf, static_cast<size_t>(n)));
+}
+
+bool ValueWriter::write_json_string(std::string_view text)
+{
+    if (!write_char('"')) return false;
+    for (char c : text) {
+        if ((c == '"' || c == '\\') && !write_char('\\')) return false;
+        if (!write_char(c)) return false;
+    }
+    return write_char('"');
+}
+
+const ValueRegistry::Descriptor* ValueRegistry::find(std::string_view name) const
+{
+    for (const auto& d : fields) if (name == d.name) return &d;
+    return nullptr;
+}
+
+const ValueRegistry::Descriptor* ValueRegistry::descriptor(FieldId id) const
+{
+    for (const auto& d : fields) if (d.id == id) return &d;
+    return nullptr;
+}
+
+bool ValueRegistry::set_from_wire(std::string_view name, std::string_view wire_value, bool external_write)
+{
+    const Descriptor* d = find(name);
+    if (!d || (external_write && !d->info.writable)) return false;
+    if (d->kind == Kind::real) { Real v = 0; return parse_real(wire_value, v) && set_real(d->id, v, external_write); }
+    if (d->kind == Kind::boolean) { bool v = false; return parse_bool(wire_value, v) && set_bool(d->id, v, external_write); }
+    return set_string(d->id, strip_quotes(wire_value), external_write);
+}
+
+bool ValueRegistry::set_real(std::string_view name, Real value, bool external_write)
+{
+    const Descriptor* d = find(name);
+    return d && set_real(d->id, value, external_write);
+}
+
+bool ValueRegistry::set_bool(std::string_view name, bool value, bool external_write)
+{
+    const Descriptor* d = find(name);
+    return d && set_bool(d->id, value, external_write);
+}
+
+bool ValueRegistry::set_string(std::string_view name, std::string_view value, bool external_write)
+{
+    const Descriptor* d = find(name);
+    return d && set_string(d->id, value, external_write);
+}
+
+bool ValueRegistry::read_real(std::string_view name, Real& out) const
+{
+    const Descriptor* d = find(name);
+    return d && read_real(d->id, out);
+}
+
+bool ValueRegistry::read_bool(std::string_view name, bool& out) const
+{
+    const Descriptor* d = find(name);
+    return d && read_bool(d->id, out);
+}
+
+bool ValueRegistry::read_string(std::string_view name, std::string_view& out) const
+{
+    const Descriptor* d = find(name);
+    return d && read_string(d->id, out);
+}
+
+bool ValueRegistry::set_real(FieldId id, Real value, bool)
+{
+    if (!state_) return false;
+    switch (id) {
+    case FieldId::server_port: state_->server.port = static_cast<uint16_t>(value); break;
+    case FieldId::ap_heading: state_->ap.heading = value; break;
+    case FieldId::ap_heading_command: state_->ap.heading_command = value; break;
+    case FieldId::ap_heading_error: state_->ap.heading_error = value; break;
+    case FieldId::ap_command: state_->ap.command = value; break;
+    case FieldId::rudder_angle: state_->rudder.angle.value = value; state_->rudder.angle.valid = true; break;
+    case FieldId::rudder_offset: state_->rudder.offset = value; break;
+    case FieldId::rudder_range: state_->rudder.range = value; break;
+    case FieldId::servo_command: state_->servo.command = value; break;
+    case FieldId::servo_current: state_->servo.current = value; break;
+    case FieldId::servo_voltage: state_->servo.voltage = value; break;
+    default: return false;
+    }
+    mark_dirty(id);
+    return true;
+}
+
+bool ValueRegistry::set_bool(FieldId id, bool value, bool)
+{
+    if (!state_) return false;
+    switch (id) {
+    case FieldId::server_running: state_->server.running = value; break;
+    case FieldId::ap_enabled: state_->ap.enabled = value; break;
+    case FieldId::servo_engaged: state_->servo.engaged = value; break;
+    case FieldId::servo_fault: state_->servo.fault = value; break;
+    default: return false;
+    }
+    mark_dirty(id);
+    return true;
+}
+
+bool ValueRegistry::set_string(FieldId id, std::string_view value, bool)
+{
+    if (!state_) return false;
+    if (id == FieldId::ap_mode) state_->ap.mode = std::string(value);
+    else if (id == FieldId::ap_pilot) state_->ap.pilot = std::string(value);
+    else return false;
+    mark_dirty(id);
+    return true;
+}
+
+bool ValueRegistry::read_real(FieldId id, Real& out) const
+{
+    if (!state_) return false;
+    switch (id) {
+    case FieldId::server_port: out = static_cast<Real>(state_->server.port); return true;
+    case FieldId::ap_heading: out = state_->ap.heading; return true;
+    case FieldId::ap_heading_command: out = state_->ap.heading_command; return true;
+    case FieldId::ap_heading_error: out = state_->ap.heading_error; return true;
+    case FieldId::ap_command: out = state_->ap.command; return true;
+    case FieldId::rudder_angle: out = state_->rudder.angle.value; return state_->rudder.angle.valid;
+    case FieldId::rudder_offset: out = state_->rudder.offset; return true;
+    case FieldId::rudder_range: out = state_->rudder.range; return true;
+    case FieldId::servo_command: out = state_->servo.command; return true;
+    case FieldId::servo_current: out = state_->servo.current; return true;
+    case FieldId::servo_voltage: out = state_->servo.voltage; return true;
+    default: return false;
+    }
+}
+
+bool ValueRegistry::read_bool(FieldId id, bool& out) const
+{
+    if (!state_) return false;
+    switch (id) {
+    case FieldId::server_running: out = state_->server.running; return true;
+    case FieldId::ap_enabled: out = state_->ap.enabled; return true;
+    case FieldId::servo_engaged: out = state_->servo.engaged; return true;
+    case FieldId::servo_fault: out = state_->servo.fault; return true;
+    default: return false;
+    }
+}
+
+bool ValueRegistry::read_string(FieldId id, std::string_view& out) const
+{
+    if (!state_) return false;
+    if (id == FieldId::ap_mode) { out = state_->ap.mode; return true; }
+    if (id == FieldId::ap_pilot) { out = state_->ap.pilot; return true; }
+    return false;
+}
+
+bool ValueRegistry::write_value(std::string_view name, ValueWriter& out) const
+{
+    const Descriptor* d = find(name);
+    if (!d) return false;
+    Real r = 0;
+    bool b = false;
+    std::string_view s;
+    if (d->kind == Kind::real) return read_real(d->id, r) && out.write_real(r);
+    if (d->kind == Kind::boolean) return read_bool(d->id, b) && out.write_bool(b);
+    return read_string(d->id, s) && out.write_json_string(s);
+}
+
+bool ValueRegistry::write_value_line(std::string_view name, ValueWriter& out) const
+{
+    const Descriptor* d = find(name);
+    return d && write_value_line(d->id, out);
+}
+
+bool ValueRegistry::write_value_line(FieldId id, ValueWriter& out) const
+{
+    const Descriptor* d = descriptor(id);
+    return d && out.write(d->name) && out.write_char('=') && write_value(d->name, out) && out.write_char('\n');
+}
+
+bool ValueRegistry::write_info_json(FieldId id, ValueWriter& out) const
+{
+    const Descriptor* d = descriptor(id);
+    if (!d) return false;
+    return out.write("{\"type\":") && out.write_json_string(d->info.type) && (!d->info.writable || out.write(",\"writable\":true")) && out.write_char('}');
+}
+
+bool ValueRegistry::write_values_json(ValueWriter& out) const
+{
+    if (!out.write_char('{')) return false;
+    bool first = true;
+    for (const auto& d : fields) {
+        if (!first && !out.write_char(',')) return false;
+        first = false;
+        if (!out.write_json_string(d.name) || !out.write_char(':') || !write_info_json(d.id, out)) return false;
+    }
+    return out.write_char('}');
+}
+
+bool ValueRegistry::watch(std::string_view name, Real period_seconds, uint64_t now_us, ValueWriter* initial_line)
+{
+    const Descriptor* d = find(name);
+    if (!d) return false;
+    if (initial_line) write_value_line(d->id, *initial_line);
+    for (auto& w : watches_) if (w.active && w.id == d->id) { w.period_seconds = period_seconds; w.next_due_us = now_us + period_us(period_seconds); return true; }
+    for (auto& w : watches_) if (!w.active) { w.active = true; w.id = d->id; w.period_seconds = period_seconds; w.next_due_us = now_us + period_us(period_seconds); return true; }
+    return false;
+}
+
+bool ValueRegistry::unwatch(std::string_view name)
+{
+    const Descriptor* d = find(name);
+    if (!d) return false;
+    for (auto& w : watches_) if (w.active && w.id == d->id) w.active = false;
+    return true;
+}
+
+void ValueRegistry::mark_dirty(FieldId id)
+{
+    const size_t index = static_cast<size_t>(id);
+    if (index < dirty_.size()) dirty_[index] = true;
+}
+
+void ValueRegistry::emit_changed_watches(ValueWriter& out)
+{
+    for (size_t i = 0; i < dirty_.size(); ++i) {
+        if (!dirty_[i]) continue;
+        const FieldId id = static_cast<FieldId>(i);
+        bool watched = false;
+        for (const auto& w : watches_) if (w.active && w.id == id && w.period_seconds == Real{0}) { watched = true; break; }
+        if (watched) write_value_line(id, out);
+        dirty_[i] = false;
+    }
+}
+
+void ValueRegistry::emit_due_watches(uint64_t now_us, ValueWriter& out)
+{
+    for (auto& w : watches_) {
+        if (!w.active || w.period_seconds <= Real{0} || now_us < w.next_due_us) continue;
+        write_value_line(w.id, out);
+        const uint64_t period = period_us(w.period_seconds);
+        do { w.next_due_us += period; } while (period && now_us >= w.next_due_us);
+    }
+}
+
+} // namespace pypilot

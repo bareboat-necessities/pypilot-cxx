@@ -10,28 +10,24 @@ int main()
     pypilot::ValueRegistry values;
     pypilot::PypilotServer server(loop, state, values);
 
-    auto list = server.handle_line("list");
-    assert(list.size() == 1);
-    assert(list[0].find("values=") == 0);
+    std::string out;
+    pypilot::StringValueWriter writer(out);
+    assert(server.handle_line("watch={\"values\":true}", writer));
+    assert(out.find("values=") == 0);
 
-    auto set = server.handle_line("ap.enabled=true");
-    assert(set.size() == 1);
+    out.clear();
+    assert(server.handle_line("ap.enabled=true", writer));
+    assert(out.empty());
     assert(state.ap.enabled);
 
-    auto get = server.handle_line("get ap.enabled");
-    assert(get.size() == 1);
-    assert(get[0] == "ap.enabled=true\n");
+    out.clear();
+    assert(server.handle_line("watch={\"ap.heading_command\":true}", writer));
+    assert(out.find("ap.heading_command=") == 0);
 
-    auto denied = server.handle_line("imu.heading=20");
-    assert(denied.size() == 1);
-    assert(denied[0].find("error=") == 0);
-
-    auto watch = server.handle_line("watch ap.heading_command");
-    assert(watch.size() == 1);
-    server.handle_line("ap.heading_command=44");
-    auto out = server.collect_output();
-    bool saw = false;
-    for (const auto& line : out) if (line.find("ap.heading_command=") == 0) saw = true;
-    assert(saw);
+    out.clear();
+    assert(server.handle_line("ap.heading_command=44", writer));
+    assert(out.empty());
+    std::string emitted = server.collect_output();
+    assert(emitted.find("ap.heading_command=") != std::string::npos);
     return 0;
 }
