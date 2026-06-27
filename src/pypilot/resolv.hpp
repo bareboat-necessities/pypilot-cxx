@@ -1,24 +1,11 @@
 #pragma once
 
+#include <cmath>
+#include "pypilot/syslib/data_model.hpp"
+
 namespace pypilot {
-
-inline double resolv(double angle)
-{
-    while (angle < -180.0) angle += 360.0;
-    while (angle >= 180.0) angle -= 360.0;
-    return angle;
-}
-
-inline double heading_error(double target_deg, double current_deg)
-{
-    return resolv(target_deg - current_deg);
-}
-
-inline double compass_normalize(double angle)
-{
-    while (angle < 0.0) angle += 360.0;
-    while (angle >= 360.0) angle -= 360.0;
-    return angle;
-}
-
+using Real = syslib::data_model::Real;
+inline Real resolv(Real angle) { while (angle < Real{-180}) angle += Real{360}; while (angle >= Real{180}) angle -= Real{360}; return angle; }
+inline Real heading_error(Real command_deg, Real heading_deg) { return resolv(command_deg - heading_deg); }
+inline Real compass_normalize(Real angle) { angle = std::fmod(angle, Real{360}); if (angle < Real{0}) angle += Real{360}; return angle; }
 } // namespace pypilot
