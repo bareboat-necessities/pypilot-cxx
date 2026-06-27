@@ -1,5 +1,7 @@
 #pragma once
 
+#include <array>
+#include <cstddef>
 #include <cstdint>
 #include <deque>
 #include <memory>
@@ -12,6 +14,7 @@
 #include "pypilot/platform.hpp"
 #include "pypilot/resolv.hpp"
 #include "pypilot/syslib/data_model.hpp"
+#include "pypilot/syslib/servo_protocol.hpp"
 
 namespace pypilot {
 
@@ -49,11 +52,49 @@ public:
         water_speed,
         water_leeway,
         rudder_angle,
+        rudder_speed,
         rudder_offset,
+        rudder_scale,
+        rudder_nonlinearity,
         rudder_range,
+        rudder_calibration_state,
+        servo_position_command,
         servo_command,
         servo_current,
+        servo_current_noise,
         servo_voltage,
+        servo_controller_temp,
+        servo_motor_temp,
+        servo_max_current,
+        servo_current_factor,
+        servo_current_offset,
+        servo_voltage_factor,
+        servo_voltage_offset,
+        servo_max_controller_temp,
+        servo_max_motor_temp,
+        servo_max_slew_speed,
+        servo_max_slew_slow,
+        servo_speed_gain,
+        servo_gain,
+        servo_clutch_pwm,
+        servo_use_brake,
+        servo_period,
+        servo_compensate_current,
+        servo_compensate_voltage,
+        servo_amp_hours,
+        servo_watts,
+        servo_speed,
+        servo_speed_min,
+        servo_speed_max,
+        servo_position,
+        servo_position_p,
+        servo_position_i,
+        servo_position_d,
+        servo_raw_command,
+        servo_use_eeprom,
+        servo_state,
+        servo_controller,
+        servo_flags,
         servo_engaged,
         servo_fault,
         apb_xte,
@@ -198,14 +239,46 @@ class Servo {
 public:
     Servo(EventLoop& loop, PypilotState& state);
     void command(double value);
+    void raw_command(double value);
+    void stop();
+    void reset();
+    void disengage();
     void set_autopilot_enabled(bool enabled);
     void poll();
+    uint16_t feed_driver_bytes(const uint8_t* bytes, size_t len);
+    std::vector<uint8_t> take_driver_tx();
+    bool fault() const;
 private:
+    void send_driver_params(int current_multiplier = 1);
+    void queue_packet(const std::array<uint8_t, 4>& packet);
+    void apply_driver_sample(uint16_t mask);
     EventLoop& loop_;
+    PypilotState& state_;
+    syslib::servo_protocol::Parser parser_;
+    syslib::servo_protocol::TelemetrySample sample_;
+    std::vector<uint8_t> tx_;
+    int out_sync_ = 0;
+    int lastdir_ = 0;
+    bool ap_enabled_ = false;
+    bool last_ap_enabled_ = false;
+    bool disengaged_ = true;
+    uint64_t command_timeout_us_ = 0;
+    uint64_t last_zero_command_us_ = 0;
+    uint64_t driver_timeout_start_us_ = 0;
+};
+
+class Rudder {
+public:
+    explicit Rudder(PypilotState& state);
+    void update_minmax();
+    bool update(double raw, std::string_view device, uint64_t now_us);
+    bool invalid() const;
+    void reset();
+    void poll(uint64_t now_us);
+private:
     PypilotState& state_;
 };
 
-class Rudder { public: explicit Rudder(PypilotState& state); void poll(uint64_t now_us); private: PypilotState& state_; };
 class Tacking { public: explicit Tacking(PypilotState& state); bool process(); void poll(uint64_t now_us); private: PypilotState& state_; };
 class Nmea { public: Nmea(EventLoop& loop, PypilotState& state); bool feed_line(std::string_view line, SensorSource source = SensorSource::serial); void poll(); private: EventLoop& loop_; PypilotState& state_; };
 class Pilot;
