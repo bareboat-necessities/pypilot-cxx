@@ -3,7 +3,7 @@
 #include <array>
 #include <cstddef>
 #include <cstdint>
-#include <deque>
+#include <cstring>
 #include <memory>
 #include <optional>
 #include <string>
@@ -26,7 +26,6 @@ class ValueWriter {
 public:
     virtual ~ValueWriter() = default;
     virtual bool write(std::string_view text) = 0;
-
     bool write_char(char c) { return write(std::string_view(&c, 1)); }
     bool write_bool(bool value) { return write(value ? "true" : "false"); }
     bool write_real(Real value);
@@ -122,17 +121,59 @@ private:
     EventLoop& loop_; PypilotState& state_; ValueRegistry& values_; bool running_ = false;
 };
 
-class PypilotClient {
+class PypilotClient : private syslib::event_loop::ITcpClientHandler {
 public:
+    static constexpr size_t MaxClientWatches = 32;
+    static constexpr size_t MaxPendingLines = 16;
+    static constexpr size_t MaxLineSize = 192;
+    static constexpr size_t MaxNameSize = 64;
+
     PypilotClient(EventLoop& loop, PypilotState& state, ValueRegistry& values);
+
+    bool connect(const char* host = "127.0.0.1", uint16_t port = PYPILOT_CXX_DEFAULT_PORT);
+    bool connected() const;
+    void close();
+
     void poll();
     void receive(Real timeout_seconds);
     void watch(std::string name, Real period_seconds = 0);
+    void watch(std::string_view name, Real period_seconds = 0);
+    void unwatch(std::string_view name);
     void set(std::string name, std::string wire_value);
+    void set_bool(std::string_view name, bool value);
+    void set_real(std::string_view name, Real value);
+    void set_string(std::string_view name, std::string_view value);
+    bool send_raw(std::string_view line);
     std::optional<std::string> pop_outgoing();
     void handle_line(std::string_view line);
+
 private:
-    EventLoop& loop_; PypilotState& state_; ValueRegistry& values_; std::deque<std::string> outgoing_; std::deque<std::string> incoming_;
+    struct ClientWatch { bool active = false; char name[MaxNameSize]{}; Real period_seconds = 0; };
+    struct PendingLine { bool active = false; char bytes[MaxLineSize]{}; size_t size = 0; };
+
+    void on_connect(syslib::event_loop::ITcpConnection& connection, const syslib::event_loop::TcpPeerInfo& peer) override;
+    void on_data(syslib::event_loop::ITcpConnection& connection) override;
+    void on_close(syslib::event_loop::ITcpConnection& connection) override;
+    void on_error(int error_code) override;
+
+    bool queue_or_write(std::string_view line);
+    bool queue_line(std::string_view line);
+    void flush_pending();
+    void replay_watches();
+    void remember_watch(std::string_view name, Real period_seconds);
+    bool write_watch_line(std::string_view name, Real period_seconds);
+    static bool copy_name(char* dst, size_t dst_size, std::string_view src);
+
+    EventLoop& loop_;
+    PypilotState& state_;
+    ValueRegistry& values_;
+    syslib::event_loop::NativeTcpClient<EventLoop> tcp_client_;
+    syslib::event_loop::ITcpConnection* connection_ = nullptr;
+    std::array<ClientWatch, MaxClientWatches> watches_{};
+    std::array<PendingLine, MaxPendingLines> pending_{};
+    char host_[64] = "127.0.0.1";
+    uint16_t port_ = PYPILOT_CXX_DEFAULT_PORT;
+    int last_error_ = 0;
 };
 
 class Sensors { public: explicit Sensors(PypilotState& state); void poll(uint64_t now_us); bool accept_source(SensorSource current, SensorSource incoming) const; void update_apb_command(); private: PypilotState& state_; uint64_t last_apb_update_us_ = 0; };
