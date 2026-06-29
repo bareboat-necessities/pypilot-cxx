@@ -3,14 +3,17 @@
 
 namespace pypilot {
 
-Autopilot::Autopilot(EventLoop& loop, PypilotState& state, ValueRegistry& values)
-    : loop_(loop), state_(state), values_(values), server_(loop, state, values), client_(loop, state, values), sensors_(state), boatimu_(loop, state), servo_(loop, state), rudder_(state), tacking_(state), nmea_(loop, state), pilot_(std::make_unique<BasicPilot>(state))
+Autopilot::Autopilot(EventLoop& loop, PypilotState& state)
+    : loop_(loop),
+      state_(state),
+      sensors_(state),
+      boatimu_(loop, state),
+      servo_(loop, state),
+      rudder_(state),
+      tacking_(state),
+      nmea_(loop, state),
+      pilot_(std::make_unique<BasicPilot>(state))
 {
-    values_.set_bool("ap.enabled", state_.ap.enabled);
-    values_.set_number("ap.heading", state_.ap.heading);
-    values_.set_number("ap.heading_command", state_.ap.heading_command);
-    values_.set_string("ap.mode", state_.ap.mode);
-    values_.set_string("ap.pilot", state_.ap.pilot);
 }
 
 Autopilot::~Autopilot() = default;
@@ -18,10 +21,8 @@ Autopilot::~Autopilot() = default;
 void Autopilot::iteration()
 {
     const uint64_t start_us = loop_.now_us();
-    const uint64_t period_us = seconds_to_us(1.0 / boatimu_.rate());
+    const uint64_t period_us = seconds_to_us(Real{1} / boatimu_.rate());
 
-    server_.poll();
-    client_.receive(state_.ap.enabled ? 0.0 : us_to_seconds(period_us));
     if (!state_.ap.enabled) servo_.poll();
     sensors_.poll(start_us);
 
@@ -47,17 +48,12 @@ void Autopilot::iteration()
     tacking_.poll(loop_.now_us());
     nmea_.poll();
 
-    values_.set_bool("ap.enabled", state_.ap.enabled);
-    values_.set_number("ap.heading", state_.ap.heading);
-    values_.set_number("ap.heading_command", state_.ap.heading_command);
-    values_.set_number("ap.heading_error", state_.ap.heading_error);
-
     sleep_remainder(start_us, period_us);
 }
 
 void Autopilot::compute_offsets() { /* TODO: translate compute_offsets from autopilot.py. */ }
 void Autopilot::adjust_mode() { /* TODO: translate mode adjustment and pilot selection from autopilot.py. */ }
-void Autopilot::compute_heading_error() { state_.ap.heading_error = static_cast<Real>(heading_error(state_.ap.heading_command, state_.ap.heading)); }
+void Autopilot::compute_heading_error() { state_.ap.heading_error = heading_error(state_.ap.heading_command, state_.ap.heading); }
 Pilot& Autopilot::selected_pilot() { return *pilot_; /* TODO: create/select pilots by configured name instead of always basic. */ }
 
 void Autopilot::sleep_remainder(uint64_t start_us, uint64_t period_us)
