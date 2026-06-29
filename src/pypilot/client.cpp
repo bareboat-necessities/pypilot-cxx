@@ -13,6 +13,21 @@ std::string_view trim_view(std::string_view s)
     return s;
 }
 
+struct PypilotRecordView {
+    std::string_view name;
+    std::string_view json;
+};
+
+bool parse_record(std::string_view line, PypilotRecordView& out)
+{
+    line = trim_view(line);
+    const size_t eq = line.find('=');
+    if (line.empty() || eq == std::string_view::npos || eq == 0) return false;
+    out.name = trim_view(line.substr(0, eq));
+    out.json = trim_view(line.substr(eq + 1));
+    return !out.name.empty();
+}
+
 size_t append_raw(char* out, size_t cap, size_t pos, std::string_view s)
 {
     if (!out || cap == 0) return pos;
@@ -27,6 +42,9 @@ size_t append_raw(char* out, size_t cap, size_t pos, std::string_view s)
 void trim_number(char* s)
 {
     if (!s) return;
+    char* first = s;
+    while (*first == ' ') ++first;
+    if (first != s) std::memmove(s, first, std::strlen(first) + 1);
     char* end = s + std::strlen(s);
     while (end > s && end[-1] == '0') --end;
     if (end > s && end[-1] == '.') --end;
@@ -47,54 +65,48 @@ size_t append_json_string(char* out, size_t cap, size_t pos, std::string_view s)
     pos = append_raw(out, cap, pos, "\"");
     for (char c : s) {
         if (c == '"' || c == '\\') pos = append_raw(out, cap, pos, "\\");
+        else if (c == '\n') { pos = append_raw(out, cap, pos, "\\n"); continue; }
+        else if (c == '\r') { pos = append_raw(out, cap, pos, "\\r"); continue; }
+        else if (c == '\t') { pos = append_raw(out, cap, pos, "\\t"); continue; }
         pos = append_raw(out, cap, pos, std::string_view(&c, 1));
     }
     return append_raw(out, cap, pos, "\"");
 }
 
-bool make_watch_line(char* out, size_t cap, std::string_view name, Real period_seconds, bool unwatch)
+bool make_record_raw(char* out, size_t cap, std::string_view name, std::string_view json)
+{
+    size_t pos = 0;
+    pos = append_raw(out, cap, pos, name);
+    pos = append_raw(out, cap, pos, "=");
+    pos = append_raw(out, cap, pos, json);
+    pos = append_raw(out, cap, pos, "\n");
+    return pos > 0 && pos + 1 < cap;
+}
+
+bool make_watch(char* out, size_t cap, std::string_view name, std::string_view period_json)
 {
     size_t pos = 0;
     pos = append_raw(out, cap, pos, "watch={\"");
     pos = append_raw(out, cap, pos, name);
     pos = append_raw(out, cap, pos, "\":");
-    if (unwatch) pos = append_raw(out, cap, pos, "false");
-    else if (period_seconds <= Real{0}) pos = append_raw(out, cap, pos, "true");
-    else pos = append_real(out, cap, pos, period_seconds);
+    pos = append_raw(out, cap, pos, period_json);
     pos = append_raw(out, cap, pos, "}\n");
     return pos > 0 && pos + 1 < cap;
 }
 
-bool make_set_line(char* out, size_t cap, std::string_view name, std::string_view wire_value)
+bool make_watch_period(char* out, size_t cap, std::string_view name, Real period_seconds)
 {
-    size_t pos = 0;
-    pos = append_raw(out, cap, pos, name);
-    pos = append_raw(out, cap, pos, "=");
-    pos = append_raw(out, cap, pos, wire_value);
-    pos = append_raw(out, cap, pos, "\n");
-    return pos > 0 && pos + 1 < cap;
+    if (period_seconds <= Real{0}) return make_watch(out, cap, name, "true");
+    char period[32];
+    append_real(period, sizeof(period), 0, period_seconds);
+    return make_watch(out, cap, name, period);
 }
 } // namespace
 
 PypilotClient::PypilotClient(EventLoop& loop, PypilotState& state, ValueRegistry& values)
-    : loop_(loop), state_(state), values_(values), tcp_client_(loop)
+    : loop_(loop), state_(state), values_(values)
 {
     values_.attach(state_);
-}
-
-bool PypilotClient::connect(const char* host, uint16_t port)
-{
-    copy_name(host_, sizeof(host_), host ? std::string_view(host) : std::string_view("127.0.0.1"));
-    port_ = port;
-    syslib::event_loop::TcpConnectOptions options;
-    options.host = host_;
-    options.port = port_;
-    return tcp_client_.connect(options, *this);
-}
-
-bool PypilotClient::connected() const
-{
-    return connection_ && connection_->valid();
 }
 
 void PypilotClient::close()
@@ -127,37 +139,39 @@ void PypilotClient::watch(std::string_view name, Real period_seconds)
 
 void PypilotClient::unwatch(std::string_view name)
 {
-    for (auto& watch : watches_) if (watch.active && name == watch.name) watch.active = false;
+    for (auto& watch : watches_) {
+        if (watch.active && name == watch.name) watch.active = false;
+    }
     char line[MaxLineSize];
-    if (make_watch_line(line, sizeof(line), name, Real{0}, true)) queue_or_write(line);
+    if (make_watch(line, sizeof(line), name, "false")) queue_or_write(line);
 }
 
 void PypilotClient::set(std::string name, std::string wire_value)
 {
     char line[MaxLineSize];
-    if (make_set_line(line, sizeof(line), name, wire_value)) queue_or_write(line);
+    if (make_record_raw(line, sizeof(line), name, wire_value)) queue_or_write(line);
 }
 
 void PypilotClient::set_bool(std::string_view name, bool value)
 {
     char line[MaxLineSize];
-    if (make_set_line(line, sizeof(line), name, value ? "true" : "false")) queue_or_write(line);
+    if (make_record_raw(line, sizeof(line), name, value ? "true" : "false")) queue_or_write(line);
 }
 
 void PypilotClient::set_real(std::string_view name, Real value)
 {
-    char value_buf[32]{};
-    append_real(value_buf, sizeof(value_buf), 0, value);
+    char json[32];
+    append_real(json, sizeof(json), 0, value);
     char line[MaxLineSize];
-    if (make_set_line(line, sizeof(line), name, value_buf)) queue_or_write(line);
+    if (make_record_raw(line, sizeof(line), name, json)) queue_or_write(line);
 }
 
 void PypilotClient::set_string(std::string_view name, std::string_view value)
 {
-    char value_buf[128]{};
-    append_json_string(value_buf, sizeof(value_buf), 0, value);
+    char json[128];
+    append_json_string(json, sizeof(json), 0, value);
     char line[MaxLineSize];
-    if (make_set_line(line, sizeof(line), name, value_buf)) queue_or_write(line);
+    if (make_record_raw(line, sizeof(line), name, json)) queue_or_write(line);
 }
 
 bool PypilotClient::send_raw(std::string_view line)
@@ -180,20 +194,16 @@ std::optional<std::string> PypilotClient::pop_outgoing()
 
 void PypilotClient::handle_line(std::string_view line)
 {
-    line = trim_view(line);
-    if (line.empty()) return;
-    const size_t eq = line.find('=');
-    if (eq == std::string_view::npos || eq == 0) return;
-    const std::string_view name = trim_view(line.substr(0, eq));
-    const std::string_view value = trim_view(line.substr(eq + 1));
-    if (name == "values") {
-        // TODO: parse values metadata if the UI/client side needs dynamic descriptors.
+    PypilotRecordView record;
+    if (!parse_record(line, record)) return;
+    if (record.name == "values") {
+        // TODO: parse metadata for UI clients that need dynamic value descriptors.
         return;
     }
-    values_.set_from_wire(name, value, false);
+    values_.set_from_wire(record.name, record.json, false);
 }
 
-void PypilotClient::on_connect(syslib::event_loop::ITcpConnection& connection, const syslib::event_loop::TcpPeerInfo& peer)
+void PypilotClient::on_connect(async_event_loop::ITcpConnection& connection, const async_event_loop::TcpPeerInfo& peer)
 {
     (void)peer;
     connection_ = &connection;
@@ -201,7 +211,7 @@ void PypilotClient::on_connect(syslib::event_loop::ITcpConnection& connection, c
     replay_watches();
 }
 
-void PypilotClient::on_data(syslib::event_loop::ITcpConnection& connection)
+void PypilotClient::on_data(async_event_loop::ITcpConnection& connection)
 {
     char line[MaxLineSize];
     while (connection.read_line(line, sizeof(line))) {
@@ -209,7 +219,7 @@ void PypilotClient::on_data(syslib::event_loop::ITcpConnection& connection)
     }
 }
 
-void PypilotClient::on_close(syslib::event_loop::ITcpConnection& connection)
+void PypilotClient::on_close(async_event_loop::ITcpConnection& connection)
 {
     if (&connection == connection_) connection_ = nullptr;
 }
@@ -285,7 +295,7 @@ void PypilotClient::remember_watch(std::string_view name, Real period_seconds)
 bool PypilotClient::write_watch_line(std::string_view name, Real period_seconds)
 {
     char line[MaxLineSize];
-    return make_watch_line(line, sizeof(line), name, period_seconds, false) && queue_or_write(line);
+    return make_watch_period(line, sizeof(line), name, period_seconds) && queue_or_write(line);
 }
 
 bool PypilotClient::copy_name(char* dst, size_t dst_size, std::string_view src)
