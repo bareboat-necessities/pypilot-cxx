@@ -104,15 +104,22 @@ bool make_watch_period(char* out, size_t cap, std::string_view name, Real period
 } // namespace
 
 PypilotClient::PypilotClient(EventLoop& loop, PypilotState& state, ValueRegistry& values)
-    : loop_(loop), state_(state), values_(values)
+    : loop_(loop), state_(state), values_(values), line_reader_(tcp_stream_)
 {
     values_.attach(state_);
+    line_reader_.on_data_ready(this, &PypilotClient::on_line_ready);
 }
 
 void PypilotClient::close()
 {
+    if (line_event_) {
+        loop_.cancel(line_event_);
+        line_event_ = 0;
+    }
     if (connection_) connection_->close();
     connection_ = nullptr;
+    tcp_stream_.detach();
+    line_reader_.reset();
 }
 
 void PypilotClient::poll()
@@ -207,27 +214,55 @@ void PypilotClient::on_connect(async_event_loop::ITcpConnection& connection, con
 {
     (void)peer;
     connection_ = &connection;
+    tcp_stream_.attach(connection);
+    line_reader_.reset();
+    if (line_event_) loop_.cancel(line_event_);
+    line_event_ = loop_.on_bytes_ready(tcp_stream_, [this]() { poll_line_reader(); });
     flush_pending();
     replay_watches();
 }
 
 void PypilotClient::on_data(async_event_loop::ITcpConnection& connection)
 {
-    char line[MaxLineSize];
-    while (connection.read_line(line, sizeof(line))) {
-        handle_line(line);
-    }
+    (void)connection;
+    poll_line_reader();
 }
 
 void PypilotClient::on_close(async_event_loop::ITcpConnection& connection)
 {
-    if (&connection == connection_) connection_ = nullptr;
+    if (&connection == connection_) {
+        if (line_event_) {
+            loop_.cancel(line_event_);
+            line_event_ = 0;
+        }
+        connection_ = nullptr;
+        tcp_stream_.detach();
+        line_reader_.reset();
+    }
 }
 
 void PypilotClient::on_error(int error_code)
 {
     last_error_ = error_code;
+    if (line_event_) {
+        loop_.cancel(line_event_);
+        line_event_ = 0;
+    }
     connection_ = nullptr;
+    tcp_stream_.detach();
+    line_reader_.reset();
+}
+
+void PypilotClient::poll_line_reader()
+{
+    if (tcp_stream_.readable()) line_reader_.poll(loop_.now_us());
+}
+
+void PypilotClient::on_line_ready(void* context, async_event_loop::LineView line)
+{
+    auto* self = static_cast<PypilotClient*>(context);
+    if (!self || !line.data) return;
+    self->handle_line(std::string_view(line.data, line.size));
 }
 
 bool PypilotClient::queue_or_write(std::string_view line)
