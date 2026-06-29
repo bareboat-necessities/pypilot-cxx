@@ -6,8 +6,7 @@ int main()
 {
     pypilot::EventLoop loop;
     pypilot::PypilotState state;
-    pypilot::ValueRegistry values;
-    pypilot::Autopilot autopilot(loop, state, values);
+    pypilot::Autopilot autopilot(loop, state);
 
     state.imu.heading = 350.0f;
     state.ap.heading = 350.0f;
