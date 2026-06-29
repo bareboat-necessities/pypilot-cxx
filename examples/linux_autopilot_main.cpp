@@ -6,11 +6,15 @@ int main()
 {
     pypilot::EventLoop loop;
     pypilot::PypilotState state;
+
     pypilot::ValueRegistry values;
-    pypilot::Autopilot autopilot(loop, state, values);
+    pypilot::PypilotServer server(loop, state, values);
+    pypilot::Autopilot autopilot(loop, state);
 
     for (int i = 0; i < 3; ++i) {
         autopilot.iteration();
+        std::string protocol_output = server.collect_output();
+        (void)protocol_output;
         std::cout << "heading=" << state.ap.heading
                   << " command=" << state.ap.heading_command
                   << " error=" << state.ap.heading_error
