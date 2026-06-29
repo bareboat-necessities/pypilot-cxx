@@ -10,6 +10,7 @@
 #include <string_view>
 #include <vector>
 
+#include "async_event_loop/tcp.hpp"
 #include "pypilot/config.hpp"
 #include "pypilot/platform.hpp"
 #include "pypilot/resolv.hpp"
@@ -121,7 +122,7 @@ private:
     EventLoop& loop_; PypilotState& state_; ValueRegistry& values_; bool running_ = false;
 };
 
-class PypilotClient : private syslib::event_loop::ITcpClientHandler {
+class PypilotClient final : public async_event_loop::ITcpClientHandler {
 public:
     static constexpr size_t MaxClientWatches = 32;
     static constexpr size_t MaxPendingLines = 16;
@@ -130,8 +131,16 @@ public:
 
     PypilotClient(EventLoop& loop, PypilotState& state, ValueRegistry& values);
 
-    bool connect(const char* host = "127.0.0.1", uint16_t port = PYPILOT_CXX_DEFAULT_PORT);
-    bool connected() const;
+    template <typename TcpClientT>
+    bool connect(TcpClientT& tcp_client, const char* host = "127.0.0.1", uint16_t port = PYPILOT_CXX_DEFAULT_PORT)
+    {
+        async_event_loop::TcpConnectOptions options;
+        options.host = host;
+        options.port = port;
+        return tcp_client.connect(options, *this);
+    }
+
+    bool connected() const { return connection_ && connection_->valid(); }
     void close();
 
     void poll();
@@ -151,9 +160,9 @@ private:
     struct ClientWatch { bool active = false; char name[MaxNameSize]{}; Real period_seconds = 0; };
     struct PendingLine { bool active = false; char bytes[MaxLineSize]{}; size_t size = 0; };
 
-    void on_connect(syslib::event_loop::ITcpConnection& connection, const syslib::event_loop::TcpPeerInfo& peer) override;
-    void on_data(syslib::event_loop::ITcpConnection& connection) override;
-    void on_close(syslib::event_loop::ITcpConnection& connection) override;
+    void on_connect(async_event_loop::ITcpConnection& connection, const async_event_loop::TcpPeerInfo& peer) override;
+    void on_data(async_event_loop::ITcpConnection& connection) override;
+    void on_close(async_event_loop::ITcpConnection& connection) override;
     void on_error(int error_code) override;
 
     bool queue_or_write(std::string_view line);
@@ -167,12 +176,9 @@ private:
     EventLoop& loop_;
     PypilotState& state_;
     ValueRegistry& values_;
-    syslib::event_loop::NativeTcpClient<EventLoop> tcp_client_;
-    syslib::event_loop::ITcpConnection* connection_ = nullptr;
+    async_event_loop::ITcpConnection* connection_ = nullptr;
     std::array<ClientWatch, MaxClientWatches> watches_{};
     std::array<PendingLine, MaxPendingLines> pending_{};
-    char host_[64] = "127.0.0.1";
-    uint16_t port_ = PYPILOT_CXX_DEFAULT_PORT;
     int last_error_ = 0;
 };
 
