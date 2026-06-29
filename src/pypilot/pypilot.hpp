@@ -45,30 +45,13 @@ private:
 class ValueRegistry {
 public:
     static constexpr size_t MaxWatches = 64;
-
     enum class Kind : uint8_t { real, boolean, string };
-
     enum class FieldId : uint16_t {
-        server_running,
-        server_port,
-        ap_enabled,
-        ap_mode,
-        ap_pilot,
-        ap_heading,
-        ap_heading_command,
-        ap_heading_error,
-        ap_command,
-        rudder_angle,
-        rudder_offset,
-        rudder_range,
-        servo_command,
-        servo_current,
-        servo_voltage,
-        servo_engaged,
-        servo_fault,
-        count,
+        server_running, server_port, ap_enabled, ap_mode, ap_pilot, ap_heading,
+        ap_heading_command, ap_heading_error, ap_command, rudder_angle,
+        rudder_offset, rudder_range, servo_command, servo_current, servo_voltage,
+        servo_engaged, servo_fault, count,
     };
-
     struct Info {
         const char* type = "Value";
         bool writable = false;
@@ -82,17 +65,10 @@ public:
         const char* units = "";
         const char* choices_csv = "";
     };
-
-    struct Descriptor {
-        const char* name;
-        FieldId id;
-        Kind kind;
-        Info info;
-    };
+    struct Descriptor { const char* name; FieldId id; Kind kind; Info info; };
 
     void attach(PypilotState& state) { state_ = &state; }
     bool attached() const { return state_ != nullptr; }
-
     const Descriptor* find(std::string_view name) const;
     const Descriptor* descriptor(FieldId id) const;
     static constexpr size_t FieldCount = static_cast<size_t>(FieldId::count);
@@ -103,17 +79,14 @@ public:
     bool set_number(std::string_view name, Real value) { return set_real(name, value); }
     bool set_bool(std::string_view name, bool value, bool external_write = false);
     bool set_string(std::string_view name, std::string_view value, bool external_write = false);
-
     bool read_real(std::string_view name, Real& out) const;
     bool read_bool(std::string_view name, bool& out) const;
     bool read_string(std::string_view name, std::string_view& out) const;
-
     bool write_value(std::string_view name, ValueWriter& out) const;
     bool write_value_line(std::string_view name, ValueWriter& out) const;
     bool write_value_line(FieldId id, ValueWriter& out) const;
     bool write_values_json(ValueWriter& out) const;
     bool write_info_json(FieldId id, ValueWriter& out) const;
-
     bool watch(std::string_view name, Real period_seconds, uint64_t now_us, ValueWriter* initial_line = nullptr);
     bool unwatch(std::string_view name);
     void mark_dirty(FieldId id);
@@ -121,20 +94,13 @@ public:
     void emit_due_watches(uint64_t now_us, ValueWriter& out);
 
 private:
-    struct Watch {
-        bool active = false;
-        FieldId id = FieldId::server_running;
-        Real period_seconds = 0;
-        uint64_t next_due_us = 0;
-    };
-
+    struct Watch { bool active = false; FieldId id = FieldId::server_running; Real period_seconds = 0; uint64_t next_due_us = 0; };
     bool set_real(FieldId id, Real value, bool external_write);
     bool set_bool(FieldId id, bool value, bool external_write);
     bool set_string(FieldId id, std::string_view value, bool external_write);
     bool read_real(FieldId id, Real& out) const;
     bool read_bool(FieldId id, bool& out) const;
     bool read_string(FieldId id, std::string_view& out) const;
-
     PypilotState* state_ = nullptr;
     std::array<Watch, MaxWatches> watches_{};
     std::array<bool, FieldCount> dirty_{};
@@ -143,43 +109,30 @@ private:
 class PypilotServer {
 public:
     PypilotServer(EventLoop& loop, PypilotState& state, ValueRegistry& values);
-
     void poll();
     void poll(ValueWriter& out);
     bool running() const { return running_; }
-
     bool handle_line(std::string_view line, ValueWriter& out);
     std::string handle_line(std::string_view line);
     std::string collect_output();
-
 private:
     bool handle_assignment(std::string_view name, std::string_view value, ValueWriter& out);
     bool handle_watch(std::string_view expression, ValueWriter& out);
     bool error(ValueWriter& out, std::string_view message) const;
-
-    EventLoop& loop_;
-    PypilotState& state_;
-    ValueRegistry& values_;
-    bool running_ = false;
+    EventLoop& loop_; PypilotState& state_; ValueRegistry& values_; bool running_ = false;
 };
 
 class PypilotClient {
 public:
     PypilotClient(EventLoop& loop, PypilotState& state, ValueRegistry& values);
-
     void poll();
     void receive(Real timeout_seconds);
     void watch(std::string name, Real period_seconds = 0);
     void set(std::string name, std::string wire_value);
     std::optional<std::string> pop_outgoing();
     void handle_line(std::string_view line);
-
 private:
-    EventLoop& loop_;
-    PypilotState& state_;
-    ValueRegistry& values_;
-    std::deque<std::string> outgoing_;
-    std::deque<std::string> incoming_;
+    EventLoop& loop_; PypilotState& state_; ValueRegistry& values_; std::deque<std::string> outgoing_; std::deque<std::string> incoming_;
 };
 
 class Sensors { public: explicit Sensors(PypilotState& state); void poll(uint64_t now_us); bool accept_source(SensorSource current, SensorSource incoming) const; void update_apb_command(); private: PypilotState& state_; uint64_t last_apb_update_us_ = 0; };
@@ -214,14 +167,14 @@ class Pilot;
 
 class Autopilot {
 public:
-    Autopilot(EventLoop& loop, PypilotState& state, ValueRegistry& values);
+    Autopilot(EventLoop& loop, PypilotState& state);
     ~Autopilot();
     void iteration();
     PypilotState& state() { return state_; }
     const PypilotState& state() const { return state_; }
 private:
     void compute_offsets(); void adjust_mode(); void compute_heading_error(); Pilot& selected_pilot(); void sleep_remainder(uint64_t start_us, uint64_t period_us);
-    EventLoop& loop_; PypilotState& state_; ValueRegistry& values_; PypilotServer server_; PypilotClient client_; Sensors sensors_; BoatIMU boatimu_; Servo servo_; Rudder rudder_; Tacking tacking_; Nmea nmea_; std::unique_ptr<Pilot> pilot_;
+    EventLoop& loop_; PypilotState& state_; Sensors sensors_; BoatIMU boatimu_; Servo servo_; Rudder rudder_; Tacking tacking_; Nmea nmea_; std::unique_ptr<Pilot> pilot_;
 };
 
 } // namespace pypilot
