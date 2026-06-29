@@ -10,7 +10,7 @@
 #include <string_view>
 #include <vector>
 
-#include "async_event_loop/tcp.hpp"
+#include "async_event_loop.hpp"
 #include "pypilot/config.hpp"
 #include "pypilot/platform.hpp"
 #include "pypilot/resolv.hpp"
@@ -157,6 +157,19 @@ public:
     void handle_line(std::string_view line);
 
 private:
+    class TcpConnectionStream final : public async_event_loop::IByteStream {
+    public:
+        void attach(async_event_loop::ITcpConnection& connection) { connection_ = &connection; }
+        void detach() { connection_ = nullptr; }
+        int read(uint8_t* dst, size_t max_len) override { return connection_ ? connection_->read(dst, max_len) : 0; }
+        int write(const uint8_t* src, size_t len) override { return connection_ ? connection_->write(src, len) : 0; }
+        bool readable() const override { return connection_ && connection_->valid() && connection_->input_size() > 0; }
+        bool writable() const override { return connection_ && connection_->valid(); }
+        bool valid() const override { return connection_ && connection_->valid(); }
+    private:
+        async_event_loop::ITcpConnection* connection_ = nullptr;
+    };
+
     struct ClientWatch { bool active = false; char name[MaxNameSize]{}; Real period_seconds = 0; };
     struct PendingLine { bool active = false; char bytes[MaxLineSize]{}; size_t size = 0; };
 
@@ -165,6 +178,8 @@ private:
     void on_close(async_event_loop::ITcpConnection& connection) override;
     void on_error(int error_code) override;
 
+    void poll_line_reader();
+    static void on_line_ready(void* context, async_event_loop::LineView line);
     bool queue_or_write(std::string_view line);
     bool queue_line(std::string_view line);
     void flush_pending();
@@ -177,6 +192,9 @@ private:
     PypilotState& state_;
     ValueRegistry& values_;
     async_event_loop::ITcpConnection* connection_ = nullptr;
+    TcpConnectionStream tcp_stream_{};
+    async_event_loop::LineProtocolReader<MaxLineSize> line_reader_;
+    async_event_loop::EventHandle line_event_ = 0;
     std::array<ClientWatch, MaxClientWatches> watches_{};
     std::array<PendingLine, MaxPendingLines> pending_{};
     int last_error_ = 0;
